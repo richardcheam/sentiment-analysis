@@ -13,3 +13,5 @@ you could have a team of experts, each of whom is really good at one specific ta
 
 In the case of language models, MoE allows the model to learn and apply specialized knowledge to various aspects of language, like syntax, semantics, sentiment, or context. This means the model doesn't need to rely on one general model 
 for all types of language tasks but can dynamically choose the most suitable expert.
+
+More on MoE: https://huggingface.co/blog/moe
