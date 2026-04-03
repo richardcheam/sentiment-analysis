@@ -1,0 +1,62 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "customer-feedback-intelligence"
+version = "0.1.0"
+description = "A modern NLP project for customer feedback intelligence, benchmarking, and deployment."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "MIT" }
+authors = [
+  { name = "Richard" },
+]
+dependencies = [
+  "datasets>=3.5.0,<4",
+  "evaluate>=0.4.3,<0.5",
+  "matplotlib>=3.10.1,<4",
+  "nltk>=3.9.1,<4",
+  "numpy>=2.2.4,<3",
+  "pandas>=2.2.3,<3",
+  "pyarrow>=20.0.0,<21",
+  "scikit-learn>=1.6.1,<2",
+  "sentence-transformers>=4.1.0,<5",
+  "seaborn>=0.13.2,<0.14",
+  "torch>=2.6.0,<3",
+  "transformers>=4.51.3,<5",
+  "typer>=0.15.2,<0.16",
+  "umap-learn>=0.5.7,<0.6",
+]
+
+[project.optional-dependencies]
+app = [
+  "fastapi>=0.115.12,<0.116",
+  "gradio>=5.24.0,<6",
+  "uvicorn[standard]>=0.34.0,<0.35",
+]
+
+[dependency-groups]
+dev = [
+  "ipykernel>=6.29.5,<7",
+  "jupyterlab>=4.4.0,<5",
+  "pytest>=8.3.5,<9",
+  "pytest-cov>=6.1.1,<7",
+  "ruff>=0.11.5,<0.12",
+]
+
+[project.scripts]
+customer-feedback-intelligence = "feedback_intelligence.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/feedback_intelligence"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,12 @@
+{
+  "sentiment_model_path": "legacy/models/fine-tuned/roberta_finetuned",
+  "sentiment_max_length": 256,
+  "analysis_sample_size": 600,
+  "seed": 42,
+  "theme_clusters": 6,
+  "embedding_backend": "tfidf_svd",
+  "embedding_dimensions": 64,
+  "embedding_max_features": 10000,
+  "top_terms_per_theme": 6,
+  "max_reviews_in_report": 50
+}

@@ -1,17 +1,125 @@
-# Project Overview
+# Customer Feedback Intelligence
 
-In this project, the primary focus is to explore and experiment with language models, particularly Mixture of Experts (MoE), and use these models for feature extraction and embedding. 
-Language models like DistilBERT, DeBERTa, RoBERTa are used to understand and process text in a variety of languages, and MoE plays a key role in improving the model's performance by selectively using different "experts" for different tasks.
+This repository is being rebuilt from an older IMDb sentiment-analysis project into a stronger portfolio project focused on customer feedback intelligence.
 
-Additionally, I explored more traditional approaches, such as using TF-IDF (Term Frequency-Inverse Document Frequency) embeddings and feeding them into an LSTM (Long Short-Term Memory) network for sentiment classification. 
-These experiments help understand both the power of pretrained models and the effectiveness of simpler, classical methods.
+The target project will combine:
 
-## What is MoE (Mixture of Experts)?
+- reproducible NLP benchmarking
+- transformer and embedding-based modeling
+- aspect and theme discovery
+- review prioritization
+- an inference demo or service
 
-MoE (Mixture of Experts) is a technique that allows a model to use different specialized "experts" (smaller sub-models) for different parts of the data. Imagine if instead of having one big brain trying to do everything, 
-you could have a team of experts, each of whom is really good at one specific task. The MoE system picks the most relevant experts based on the input data, leading to more efficient and faster processing.
+## Environment
 
-In the case of language models, MoE allows the model to learn and apply specialized knowledge to various aspects of language, like syntax, semantics, sentiment, or context. This means the model doesn't need to rely on one general model 
-for all types of language tasks but can dynamically choose the most suitable expert.
+This project uses `uv` for Python and dependency management.
 
-More on MoE: https://huggingface.co/blog/moe
+The preferred interpreter is Python 3.12.
+
+### Quick start
+
+```bash
+uv sync --dev
+```
+
+To include the future app dependencies:
+
+```bash
+uv sync --dev --extra app
+```
+
+Run the starter CLI:
+
+```bash
+uv run customer-feedback-intelligence --help
+```
+
+Inspect the local IMDb sample:
+
+```bash
+uv run customer-feedback-intelligence describe-dataset --sample-size 200
+```
+
+Train the transformer model and save it for inference:
+
+```bash
+uv run customer-feedback-intelligence train-transformer --config-path configs/train_roberta_imdb.json
+```
+
+This writes the model to `artifacts/models/roberta_imdb/` and training metrics to `artifacts/models/roberta_imdb_metrics.json`.
+
+Run the first reproducible baseline benchmark:
+
+```bash
+uv run customer-feedback-intelligence run-baseline --config-path configs/tfidf_logreg_imdb.json
+```
+
+This writes a benchmark artifact to `artifacts/benchmarks/tfidf_logreg_imdb.json`.
+
+Generate clustered review insights and review priorities:
+
+```bash
+uv run customer-feedback-intelligence analyze-reviews --config-path configs/review_analysis_imdb.json
+```
+
+This writes an analysis artifact to `artifacts/analysis/review_analysis_imdb.json`.
+By default, the analysis command expects a saved transformer model in `artifacts/models/roberta_imdb/`.
+
+Launch the demo app:
+
+```bash
+uv run customer-feedback-intelligence launch-demo --config-path configs/review_analysis_imdb.json
+```
+
+The Gradio app lets you paste multiple reviews, see sentiment confidence, theme grouping, and review priority in one interface.
+
+## Recommended Workflow
+
+1. Install dependencies:
+
+```bash
+uv sync --dev --extra app
+```
+
+2. Fine-tune and save the sentiment model:
+
+```bash
+uv run customer-feedback-intelligence train-transformer --config-path configs/train_roberta_imdb.json
+```
+
+3. Generate a batch analysis artifact:
+
+```bash
+uv run customer-feedback-intelligence analyze-reviews --config-path configs/review_analysis_imdb.json
+```
+
+4. Launch the demo:
+
+```bash
+uv run customer-feedback-intelligence launch-demo --config-path configs/review_analysis_imdb.json
+```
+
+## Important Paths
+
+- Transformer training config: `configs/train_roberta_imdb.json`
+- Review analysis config: `configs/review_analysis_imdb.json`
+- Saved transformer model: `artifacts/models/roberta_imdb/`
+- Transformer metrics: `artifacts/models/roberta_imdb_metrics.json`
+- Batch analysis artifact: `artifacts/analysis/review_analysis_imdb.json`
+
+## Current Layout
+
+```text
+aclImdb/                 Local IMDb dataset used by the current workflows
+artifacts/               Generated benchmark and analysis outputs
+docs/                    Project notes, archived report, and reboot plan
+legacy/                  Archived code, models, and raw assets from the old project
+src/                    Python package for the rebuilt project
+configs/                Experiment and application configs
+notebooks/archive/      Legacy notebook experiments to keep for reference
+tests/                  Automated tests
+```
+
+## Legacy Material
+
+The original notebooks, scripts, fine-tuned artifacts, and course materials have been moved into `notebooks/archive`, `legacy/`, and `docs/archive` so the active repo stays focused on the rebuilt project.

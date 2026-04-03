@@ -1,0 +1,24 @@
+.DS_Store
+.ipynb_checkpoints/
+.pytest_cache/
+.ruff_cache/
+.venv/
+__pycache__/
+*.pyc
+
+# Local data and model artifacts
+aclImdb/
+fine-tuned/
+artifacts/
+data/
+models/
+
+# Notebook and vector caches
+.vector_cache/
+
+
+# Large local archives
+*.tar
+*.tar.gz
+*.tgz
+*.zip

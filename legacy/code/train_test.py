@@ -121,7 +121,7 @@ def plot_accuracy_loss(model_name, loss_train, loss_valid, acc_train, acc_valid)
     early_stop_point = True: visualize the early stopping
   """
 
-  fig = plt.figure(figsize = (12, 8))
+  fig = plt.figure(figsize = (12, 7))
 
   # --- Metrics plot
   def plot_metric(model_name, metric_train, metric_valid, metric_name) :
@@ -145,3 +145,43 @@ def plot_accuracy_loss(model_name, loss_train, loss_valid, acc_train, acc_valid)
   for side in ['right', 'top']:
     ax.spines[side].set_visible(False)
   plot_metric(model_name, acc_train, acc_valid, "Accuracy")
+
+
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+
+def plot_confusion_matrix(model, test_loader, device, class_names=None, normalize=False, cmap='Blues'):
+    """
+    Plot the confusion matrix for the model on test data.
+
+    Parameters:
+    - model: trained model
+    - test_loader: DataLoader for test data
+    - device: device to run the model on (e.g., 'cpu' or 'cuda')
+    - class_names: list of class names for labeling axes
+    - normalize: whether to normalize the confusion matrix
+    - cmap: colormap for the plot
+    """
+    output_fn = torch.nn.Softmax(dim=1)
+    model.eval()
+    y_pred = []
+    y_true = []
+
+    with torch.no_grad():
+        for batch in test_loader:
+            inputs, labels = batch
+            inputs = inputs.to(device)
+            labels = labels.to(device)
+
+            outputs = model(x=inputs)
+            probs = output_fn(outputs)
+            preds = torch.argmax(probs, dim=1)
+
+            y_pred.extend(preds.cpu().numpy())
+            y_true.extend(labels.cpu().numpy())
+
+    cm = confusion_matrix(y_true, y_pred, normalize='true' if normalize else None)
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=class_names)
+    fig, ax = plt.subplots(figsize=(8, 6))
+    disp.plot(ax=ax, cmap=cmap)
+    plt.title('Confusion Matrix')
+    plt.show()

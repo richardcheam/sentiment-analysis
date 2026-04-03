@@ -1,0 +1,14 @@
+{
+  "model_name": "roberta-base",
+  "output_dir": "artifacts/models/roberta_imdb",
+  "metrics_output_path": "artifacts/models/roberta_imdb_metrics.json",
+  "train_sample_size": 4000,
+  "test_sample_size": 2000,
+  "validation_fraction": 0.2,
+  "seed": 42,
+  "max_length": 256,
+  "batch_size": 8,
+  "learning_rate": 0.00002,
+  "weight_decay": 0.01,
+  "epochs": 2
+}
