@@ -1,20 +1,55 @@
 # Customer Feedback Intelligence
 
 This repository is my rebuild of an older IMDb sentiment-analysis project into a
-clearer portfolio project focused on customer feedback intelligence.
+clearer end-to-end portfolio project for customer feedback intelligence.
 
 The project has two connected goals:
 
 - build a reproducible sentiment benchmark on IMDb
 - use the saved model in a customer-feedback dashboard that can score, triage,
-  and summarize uploaded reviews
+  summarize, and export uploaded review batches
 
-At the moment, the active end-to-end path is:
+## Application Features
 
-1. train and evaluate a sentiment model on IMDb
-2. save the model as an inference artifact
+The application is not just a single-text sentiment demo. I designed it as a
+batch review-analysis dashboard.
+
+It currently supports:
+
+- full-batch upload or paste workflows
+- CSV, TSV, JSON, JSONL, NDJSON, TXT, and Markdown inputs
+- sentiment scoring for every uploaded review
+- confidence and uncertainty tracking
+- manual-review flags for low-confidence or high-uncertainty cases
+- priority scoring so the most urgent reviews rise to the top
+- metadata preservation from uploads such as `review_id`, `channel`,
+  `product`, and `created_at`
+- exploratory theme clustering with representative review previews
+- benchmark snapshot cards for the IMDb benchmark and Amazon transfer check
+- CSV export of the currently filtered dashboard view
+
+In practical terms, the app is meant to answer questions like:
+
+- what is the current sentiment mix in this batch?
+- which reviews should I read first?
+- which items should be manually checked by a human?
+- are certain channels or products contributing more negative feedback?
+- what recurring issue clusters seem to be present in the batch?
+
+## Current Project State
+
+The strongest active path in the repo today is:
+
+1. train and evaluate a reproducible TF-IDF + Logistic Regression sentiment
+   model on IMDb
+2. save that model as a reusable inference artifact
 3. test zero-shot transfer on Amazon polarity reviews
-4. use the saved model inside a Gradio dashboard for batch review analysis
+4. test on a fixed local 200-example customer-feedback evaluation set
+5. use the saved model inside a Gradio dashboard for customer-feedback batch
+   analysis
+
+The RoBERTa training path is also implemented, but because it is more expensive
+to run, the current default dashboard model is the saved TF-IDF baseline.
 
 ## Environment
 
@@ -22,66 +57,55 @@ This project uses `uv` for Python and dependency management.
 
 The preferred interpreter is Python 3.12.
 
-### Quick start
+### Quick Start
 
-```bash
-uv sync --dev
-```
-
-To include the future app dependencies:
+Install dependencies:
 
 ```bash
 uv sync --dev --extra app
 ```
 
-Run the starter CLI:
+Inspect the available CLI:
 
 ```bash
 uv run customer-feedback-intelligence --help
 ```
 
-Inspect the local IMDb sample:
-
-```bash
-uv run customer-feedback-intelligence describe-dataset --sample-size 200
-```
-
-Train the transformer model and save it for inference:
-
-```bash
-uv run customer-feedback-intelligence train-transformer --config-path configs/train_roberta_imdb.json
-```
-
-This writes the model to `artifacts/models/roberta_imdb/` and training metrics to `artifacts/models/roberta_imdb_metrics.json`.
-
-Run the first reproducible baseline benchmark:
+Run the IMDb baseline and save the inference artifact:
 
 ```bash
 uv run customer-feedback-intelligence run-baseline --config-path configs/train_tfidf_logreg_imdb.json
 ```
 
-This writes a benchmark artifact to `artifacts/benchmarks/tfidf_logreg_imdb.json`
-and saves the fitted sklearn pipeline to
-`artifacts/models/tfidf_logreg_imdb.joblib`.
+Evaluate zero-shot transfer on Amazon polarity:
 
-Generate clustered review insights and review priorities:
+```bash
+uv run customer-feedback-intelligence evaluate-amazon-transfer --config-path configs/evaluate_amazon_transfer_tfidf.json
+```
+
+Evaluate the same saved model on the fixed local 200-example customer-feedback set:
+
+```bash
+uv run customer-feedback-intelligence evaluate-local-feedback --config-path configs/evaluate_local_feedback_eval_200.json
+```
+
+Generate a saved analysis artifact from sampled IMDb reviews:
 
 ```bash
 uv run customer-feedback-intelligence analyze-reviews --config-path configs/review_analysis_imdb.json
 ```
 
-This writes an analysis artifact to `artifacts/analysis/review_analysis_imdb.json`.
-By default, the analysis command uses the saved TF-IDF baseline model in
-`artifacts/models/tfidf_logreg_imdb.joblib`.
-
-Launch the demo app:
+Launch the dashboard:
 
 ```bash
 uv run customer-feedback-intelligence launch-demo --config-path configs/review_analysis_imdb.json
 ```
 
-The Gradio app lets me paste or upload customer reviews, inspect sentiment
-confidence, review priority, and lightweight theme grouping in one interface.
+Optional: fine-tune RoBERTa when more compute is available:
+
+```bash
+uv run customer-feedback-intelligence train-transformer --config-path configs/train_roberta_imdb.json
+```
 
 ## Recommended Workflow
 
@@ -91,25 +115,29 @@ confidence, review priority, and lightweight theme grouping in one interface.
 uv sync --dev --extra app
 ```
 
-2. Run and save the reproducible baseline model:
+2. Train and save the IMDb baseline:
 
 ```bash
 uv run customer-feedback-intelligence run-baseline --config-path configs/train_tfidf_logreg_imdb.json
 ```
 
-3. Generate a batch analysis artifact:
+3. Measure transfer on customer-feedback-style data:
 
 ```bash
-uv run customer-feedback-intelligence analyze-reviews --config-path configs/review_analysis_imdb.json
+uv run customer-feedback-intelligence evaluate-amazon-transfer --config-path configs/evaluate_amazon_transfer_tfidf.json
 ```
 
-4. Launch the dashboard:
+```bash
+uv run customer-feedback-intelligence evaluate-local-feedback --config-path configs/evaluate_local_feedback_eval_200.json
+```
+
+4. Launch the dashboard and upload customer feedback:
 
 ```bash
 uv run customer-feedback-intelligence launch-demo --config-path configs/review_analysis_imdb.json
 ```
 
-Optional: train the RoBERTa model when you have more compute available:
+5. Optionally train the RoBERTa model later:
 
 ```bash
 uv run customer-feedback-intelligence train-transformer --config-path configs/train_roberta_imdb.json
@@ -117,8 +145,8 @@ uv run customer-feedback-intelligence train-transformer --config-path configs/tr
 
 ## IMDb Data Loading And Preprocessing
 
-The current workflows use the local IMDb directory in `aclImdb/` and expect the
-standard split layout:
+The current benchmark workflows use the local IMDb directory in `aclImdb/` and
+expect the standard split layout:
 
 ```text
 aclImdb/
@@ -130,22 +158,22 @@ aclImdb/
     neg/
 ```
 
-The loader keeps the preprocessing intentionally light so the benchmark remains easy
-to reason about:
+I keep the preprocessing intentionally light so the benchmark remains easy to
+reason about:
 
 - reviews are loaded from raw `.txt` files in the selected split
 - labels are derived from the folder name: `pos -> positive`, `neg -> negative`
 - `review_id` and the original IMDb rating are parsed from the filename pattern
   such as `12345_9.txt`
-- sampling is deterministic with a seed and balanced across positive and negative
-  classes
-- if `sample_size=4000`, the loader samples `2000` positive and `2000` negative
-  reviews
+- sampling is deterministic with a seed and balanced across positive and
+  negative classes
+- if `sample_size=4000`, the loader samples `2000` positive and `2000`
+  negative reviews
 - the selected records are shuffled with the same seed after loading
 - no HTML stripping, lowercasing, lemmatization, or stop-word removal happens at
   dataset-load time
-- `word_count` is computed from whitespace tokenization and is used later for
-  dataset summaries and slice metrics
+- `word_count` is computed from whitespace tokenization and is later reused for
+  summaries and priority scoring
 
 The `describe-dataset` CLI command summarizes the sampled IMDb subset with:
 
@@ -157,7 +185,8 @@ The `describe-dataset` CLI command summarizes the sampled IMDb subset with:
 
 ### TF-IDF + Logistic Regression Baseline
 
-The baseline benchmark is designed to be fast, reproducible, and easy to inspect.
+The baseline benchmark is designed to be fast, reproducible, and easy to
+inspect.
 
 1. Load deterministic balanced train and test samples from `aclImdb/`.
 2. Split the sampled training set into train and validation subsets with
@@ -173,42 +202,43 @@ The baseline benchmark is designed to be fast, reproducible, and easy to inspect
    - top high-confidence error examples
 6. Save the benchmark artifact to
    `artifacts/benchmarks/tfidf_logreg_imdb.json`.
+7. Save the fitted sklearn pipeline to
+   `artifacts/models/tfidf_logreg_imdb.joblib`.
+
+This is the current default inference artifact for the dashboard.
 
 ### RoBERTa Fine-Tuning
 
 The transformer workflow fine-tunes `roberta-base` for binary sentiment
-classification on the sampled IMDb reviews.
+classification on sampled IMDb reviews.
 
 1. Load deterministic train and test samples from `aclImdb/`.
 2. Split the sampled training set into train and validation subsets with
    stratified `train_test_split`.
-3. Tokenize each review with a Hugging Face tokenizer using:
+3. Seed Python, NumPy, and Torch so the run is more reproducible.
+4. Tokenize each review with a Hugging Face tokenizer using:
    - truncation enabled
    - `padding="max_length"`
    - the configured `max_length`
-4. Load `AutoModelForSequenceClassification` with two labels:
+5. Load `AutoModelForSequenceClassification` with two labels:
    `negative` and `positive`.
-5. Fine-tune the model with `AdamW` for the configured number of epochs.
-6. Evaluate the final model on validation and test sets with:
-   - accuracy
-   - macro F1
-   - full classification report
-7. Save the final model and tokenizer to `artifacts/models/roberta_imdb/`.
-8. Save run metadata and metrics to
-   `artifacts/models/roberta_imdb_metrics.json`.
+6. Fine-tune the model with `AdamW` for the configured number of epochs.
+7. Evaluate on the validation split after every epoch.
+8. Save the best validation checkpoint to `artifacts/models/roberta_imdb/`.
+9. Evaluate that saved checkpoint on the test split.
+10. Save run metadata and metrics, including per-epoch history, to
+    `artifacts/models/roberta_imdb_metrics.json`.
 
-The current training implementation saves only the final checkpoint. It does not
-yet save per-epoch checkpoints, a separate best-validation checkpoint, or
-TensorBoard logs.
+This path is implemented and ready, but it is not the current default demo
+backend because of compute cost.
 
-## Review Analysis And Dashboard Approach
+## Customer Feedback Dashboard Approach
 
 From an application point of view, I treat sentiment classification as only one
 part of the system. The dashboard is meant to answer a broader question:
 "given a batch of customer feedback, which reviews should I look at first, what
-is the overall sentiment mix, and what kinds of issues seem to be recurring?"
-
-I split that workflow into a few steps.
+is the overall sentiment mix, what needs manual review, and what issue patterns
+seem to be emerging?"
 
 ### 1. Input Handling
 
@@ -221,17 +251,38 @@ The dashboard accepts:
 - TXT / Markdown uploads
 
 For uploaded structured files, I look for one main text column such as
-`review_text`, `text`, `review`, `comment`, `feedback`, or `body`.
+`review_text`, `text`, `review`, `comment`, `feedback`, `message`, or `body`.
 
 If the file also contains a title-like field such as `title`, `subject`,
 `summary`, or `headline`, I concatenate it with the main review body before
-inference. In other words, the model only sees text. Metadata such as `channel`,
-`rating`, or timestamps is currently ignored by the predictor.
+inference.
 
-### 2. Sentiment Inference
+The predictor sees text only, but the dashboard preserves metadata from the
+uploaded file when possible. That means fields like `review_id`, `channel`,
+`product`, and `created_at` can still be used for slicing, display, and export
+even though they are not part of the sentiment model input.
 
-Once I have a clean list of texts, I load the configured sentiment backend and
-run batch inference.
+### 2. Full-Batch Analysis
+
+The dashboard now keeps the full uploaded batch in the analysis artifact.
+
+That means:
+
+- KPIs are computed from the full batch
+- summaries reflect the full batch
+- filters and sorting operate over the full batch
+- exports include the full currently visible filtered batch
+
+I do not silently clip the uploaded reviews to a smaller top-N queue anymore.
+If a user uploads 20, 200, or more reviews, the dashboard keeps that full set.
+
+The tradeoff is that very large uploads will take longer because sentiment
+inference, embedding generation, and clustering all scale with batch size.
+
+### 3. Sentiment Inference
+
+Once I have the review texts, I load the configured sentiment backend and run
+batch inference.
 
 Right now the default app configuration uses the saved
 `TF-IDF + Logistic Regression` model. The same inference interface also supports
@@ -246,14 +297,19 @@ For each review, I store:
 - uncertainty
 
 This gives me more than a hard class label. I can use confidence and
-uncertainty later when ranking which reviews deserve attention first.
+uncertainty later when ranking and triaging the batch.
 
-### 3. Priority Scoring
+### 4. Manual Review And Priority Scoring
 
 Sentiment alone is not enough for a customer-feedback workflow, so I add a
 simple triage layer on top of the predictions.
 
-For every review, I compute a `priority_score` using:
+First, I flag reviews for manual review when:
+
+- confidence is below the configured threshold
+- uncertainty is above the configured threshold
+
+Then I compute a `priority_score` using:
 
 - negative probability
 - review length
@@ -272,10 +328,10 @@ I then map that numeric score to a priority bucket:
 - `medium`
 - `low`
 
-The idea is straightforward: strongly negative, longer, and less certain
-reviews are more likely to deserve manual review.
+The goal is straightforward: strongly negative, longer, and less certain
+reviews are more likely to deserve attention first.
 
-### 4. Theme Discovery
+### 5. Theme Discovery
 
 I also wanted the app to produce a lightweight topic-style summary of the batch,
 not just individual sentiment predictions.
@@ -286,44 +342,79 @@ My current theme pipeline works like this:
 2. reduce them into dense vectors with Truncated SVD
 3. cluster the vectors with KMeans
 4. label each cluster with its highest-weighted TF-IDF terms
+5. pick a representative review close to each cluster centroid
 
 This produces:
 
 - a `theme_id` per review
-- a list of representative `theme_terms` per cluster
-- aggregate theme summaries such as review count, negative-rate, confidence, and
-  average priority
+- a human-readable `theme_label`
+- a keyword signature per cluster
+- representative review previews
+- aggregate theme summaries such as review count, negative rate, manual-review
+  count, and average priority
 
-I keep this feature in the project because it shows the full review-intelligence
-approach I wanted to explore: not just classification, but also batch
-summarization and emerging issue grouping.
+I keep this feature because it shows the broader review-intelligence approach I
+wanted to explore: not just classification, but also batch summarization and
+emerging issue grouping.
 
 That said, I do not treat these themes as ground-truth business taxonomies.
 They are heuristic clusters derived from text similarity, not supervised issue
 labels such as `billing_problem`, `delivery_delay`, or `refund_request`. On
-small or noisy batches, the theme labels can be weak or overly literal.
+small or noisy batches, the theme labels can still be weak or overly literal.
 
-### 5. Batch Summaries
+### 6. Dashboard Outputs
 
 At the dashboard level, I expose more than raw predictions.
 
 The interface shows:
 
-- total visible reviews
+- full-batch review counts
 - predicted negative rate
 - urgent review count
+- manual-review count
 - average confidence
 - top priority score
-- sorted review queue
-- theme-level aggregates
+- metadata-aware breakdowns such as channel and product
+- a sortable review queue
+- theme-cluster summaries
 - saved benchmark and transfer snapshots
+- downloadable CSV export of the current filtered view
 
 This matters because the app is meant to feel like an analyst tool, not just a
 single-text sentiment demo.
 
+## Evaluation Beyond IMDb
+
+IMDb is the benchmark dataset, but I also wanted to know how far that benchmark
+transfers toward a customer-feedback use case.
+
+### Amazon Transfer Evaluation
+
+I added a zero-shot transfer evaluation on Amazon polarity reviews. This lets me
+measure how well a model trained on IMDb generalizes to real product-review
+language without retraining.
+
+The artifact is written to:
+
+- `artifacts/evaluations/amazon_transfer_tfidf_imdb.json`
+
+### Fixed Local Customer-Feedback Evaluation Set
+
+I also added a fixed local labeled evaluation set with 200 Amazon customer
+reviews:
+
+- `data/eval/customer_feedback_amazon_eval_200.csv`
+
+This gives me a stable local customer-feedback check that I can rerun without
+depending on a remote dataset pull every time.
+
+The evaluation artifact is written to:
+
+- `artifacts/evaluations/customer_feedback_eval_200.json`
+
 ## What The Analysis Artifact Contains
 
-The saved analysis artifact is designed to make the workflow inspectable outside
+The saved analysis artifact is meant to make the workflow inspectable outside
 the UI as well.
 
 For each run, I store:
@@ -331,9 +422,9 @@ For each run, I store:
 - sentiment model metadata
 - analysis configuration
 - theme summaries
-- prioritized review rows
+- full review rows for the analyzed batch
 
-Each prioritized review row includes:
+Each review row includes:
 
 - `review_id`
 - `predicted_label`
@@ -343,13 +434,19 @@ Each prioritized review row includes:
 - `uncertainty`
 - `word_count`
 - `theme_id`
+- `theme_label`
 - `theme_terms`
+- `requires_manual_review`
+- `manual_review_reason`
+- `review_status`
 - `priority_score`
 - `priority_level`
 - `text_preview`
+- `text`
+- `metadata`
 
 This gives me a structured record of what the app produced and how it decided to
-rank the batch.
+rank and summarize the batch.
 
 ## How I Interpret The Current Limitations
 
@@ -358,45 +455,57 @@ heuristic.
 
 - The sentiment benchmark is the strongest part of the repo right now.
 - The dashboard triage flow is useful because it combines sentiment,
-  confidence, and prioritization.
+  confidence, manual-review gating, and prioritization.
 - The theme clustering is exploratory and should be read as weak structure, not
-  as a final taxonomy.
+  as a final issue taxonomy.
+- Metadata is preserved for slicing and display, but it is not yet part of the
+  model itself.
 - IMDb is a good benchmark dataset, but it is not the same as real customer
   feedback.
-- The Amazon transfer evaluation is helpful because it shows how much of the
-  sentiment signal transfers across domains without retraining.
+- The Amazon transfer evaluation and local 200-example evaluation set are there
+  to keep that limitation visible.
+- Full-batch uploads are supported, but runtime will naturally grow with batch
+  size.
 
 That combination is the story I want a reader to understand: I started from
 reproducible sentiment benchmarking, then built a customer-feedback analysis
-layer on top of the saved model, including ranking, summarization, and
-exploratory clustering.
+layer on top of the saved model, including ranking, manual-review gating,
+summarization, metadata-aware slicing, export, and exploratory clustering.
 
 ## Important Paths
 
 - Baseline training config: `configs/train_tfidf_logreg_imdb.json`
 - Transformer training config: `configs/train_roberta_imdb.json`
 - Review analysis config: `configs/review_analysis_imdb.json`
+- Amazon transfer config: `configs/evaluate_amazon_transfer_tfidf.json`
+- Local evaluation config: `configs/evaluate_local_feedback_eval_200.json`
 - Saved baseline model: `artifacts/models/tfidf_logreg_imdb.joblib`
 - Saved transformer model: `artifacts/models/roberta_imdb/`
 - Baseline benchmark artifact: `artifacts/benchmarks/tfidf_logreg_imdb.json`
 - Transformer metrics: `artifacts/models/roberta_imdb_metrics.json`
 - Amazon transfer artifact: `artifacts/evaluations/amazon_transfer_tfidf_imdb.json`
+- Local feedback evaluation artifact:
+  `artifacts/evaluations/customer_feedback_eval_200.json`
 - Batch analysis artifact: `artifacts/analysis/review_analysis_imdb.json`
+- Dashboard exports: `artifacts/exports/`
+- Fixed local evaluation set: `data/eval/customer_feedback_amazon_eval_200.csv`
 - Sample upload files: `artifacts/sample_uploads/`
 
 ## Current Layout
 
 ```text
-aclImdb/                 Local IMDb dataset used by the current workflows
-artifacts/               Generated benchmark and analysis outputs
+aclImdb/                 Local IMDb dataset used by the benchmark workflows
+artifacts/               Generated benchmark, evaluation, analysis, and export outputs
+configs/                 Experiment and application configs
+data/eval/               Fixed local evaluation datasets
 docs/                    Project notes, archived report, and reboot plan
 legacy/                  Archived code, models, and raw assets from the old project
-src/                    Python package for the rebuilt project
-configs/                Experiment and application configs
-notebooks/archive/      Legacy notebook experiments to keep for reference
-tests/                  Automated tests
+src/                     Python package for the rebuilt project
+tests/                   Automated tests
 ```
 
 ## Legacy Material
 
-The original notebooks, scripts, fine-tuned artifacts, and course materials have been moved into `notebooks/archive`, `legacy/`, and `docs/archive` so the active repo stays focused on the rebuilt project.
+The original notebooks, scripts, fine-tuned artifacts, and course materials
+have been moved into `legacy/` and `docs/archive` so the active repo stays
+focused on the rebuilt project.

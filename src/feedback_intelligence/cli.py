@@ -12,6 +12,7 @@ from feedback_intelligence.benchmarks.tfidf_logreg import run_tfidf_logreg_basel
 from feedback_intelligence.config import (
     AmazonTransferEvaluationConfig,
     BaselineExperimentConfig,
+    LocalEvaluationConfig,
     ReviewAnalysisConfig,
     TransformerTrainingConfig,
 )
@@ -20,6 +21,7 @@ from feedback_intelligence.data.amazon_reviews import (
     summarize_reviews as summarize_amazon_reviews,
 )
 from feedback_intelligence.data.imdb import load_local_imdb_reviews, summarize_reviews
+from feedback_intelligence.data.local_reviews import load_local_labeled_reviews
 from feedback_intelligence.inference.sentiment import load_sentiment_predictor
 from feedback_intelligence.pipeline.review_analysis import analyze_reviews_with_predictor
 from feedback_intelligence.pipeline.transfer_evaluation import evaluate_reviews_with_predictor
@@ -85,6 +87,17 @@ TRANSFER_CONFIG_PATH_OPTION = typer.Option(
 TRANSFER_OUTPUT_OPTION = typer.Option(
     Path("artifacts/evaluations/amazon_transfer_tfidf_imdb.json"),
     help="Where to write the Amazon transfer evaluation artifact.",
+)
+LOCAL_EVAL_CONFIG_PATH_OPTION = typer.Option(
+    None,
+    exists=True,
+    file_okay=True,
+    dir_okay=False,
+    help="Optional JSON config for evaluating a labeled local feedback CSV.",
+)
+LOCAL_EVAL_OUTPUT_OPTION = typer.Option(
+    Path("artifacts/evaluations/customer_feedback_eval_200.json"),
+    help="Where to write the local customer-feedback evaluation artifact.",
 )
 
 
@@ -155,7 +168,7 @@ def describe_amazon_dataset(
 def run_baseline(
     base_path: Path = BASE_PATH_OPTION,
     output_path: Path = OUTPUT_PATH_OPTION,
-    config_path: Path | None = CONFIG_PATH_OPTION,
+    config_path: Path = CONFIG_PATH_OPTION,
 ) -> None:
     """Run the first reproducible benchmark on the local IMDb dataset."""
     config = (
@@ -189,7 +202,7 @@ def run_baseline(
 @app.command("train-transformer")
 def train_transformer(
     base_path: Path = BASE_PATH_OPTION,
-    config_path: Path | None = TRAINER_CONFIG_PATH_OPTION,
+    config_path: Path = TRAINER_CONFIG_PATH_OPTION,
 ) -> None:
     """Fine-tune a transformer sentiment model and save it for inference."""
     config = (
@@ -223,7 +236,7 @@ def train_transformer(
 def analyze_reviews_command(
     base_path: Path = BASE_PATH_OPTION,
     output_path: Path = ANALYSIS_OUTPUT_OPTION,
-    config_path: Path | None = ANALYSIS_CONFIG_PATH_OPTION,
+    config_path: Path = ANALYSIS_CONFIG_PATH_OPTION,
 ) -> None:
     """Generate clustered review insights and review priorities."""
     analysis_config = (
@@ -255,7 +268,7 @@ def analyze_reviews_command(
 @app.command("evaluate-amazon-transfer")
 def evaluate_amazon_transfer(
     output_path: Path = TRANSFER_OUTPUT_OPTION,
-    config_path: Path | None = TRANSFER_CONFIG_PATH_OPTION,
+    config_path: Path = TRANSFER_CONFIG_PATH_OPTION,
 ) -> None:
     """Evaluate a saved sentiment model on Amazon polarity reviews."""
     config = (
@@ -291,10 +304,49 @@ def evaluate_amazon_transfer(
     typer.echo(f"Wrote Amazon transfer evaluation artifact to {output_path}")
 
 
+@app.command("evaluate-local-feedback")
+def evaluate_local_feedback(
+    output_path: Path = LOCAL_EVAL_OUTPUT_OPTION,
+    config_path: Path = LOCAL_EVAL_CONFIG_PATH_OPTION,
+) -> None:
+    """Evaluate a saved model on a fixed local labeled customer-feedback CSV."""
+    config = (
+        LocalEvaluationConfig.from_json(config_path)
+        if config_path is not None
+        else LocalEvaluationConfig()
+    )
+    local_records = load_local_labeled_reviews(
+        dataset_path=Path(config.dataset_path),
+        text_column=config.text_column,
+        title_column=config.title_column,
+        label_column=config.label_column,
+        review_id_column=config.review_id_column,
+        split_name=config.split_name,
+        source_name=config.source_name,
+    )
+    predictor = load_sentiment_predictor(
+        model_path=Path(config.sentiment_model_path).resolve(),
+        backend=config.sentiment_backend,
+        max_length=config.sentiment_max_length,
+    )
+    artifact = evaluate_reviews_with_predictor(
+        review_records=local_records,
+        predictor=predictor,
+        dataset_info={
+            "dataset_name": config.source_name,
+            "split": config.split_name,
+            "dataset_path": config.dataset_path,
+        },
+        max_error_examples=config.max_error_examples,
+    )
+    write_json(output_path, artifact.to_dict())
+    typer.echo(f"Wrote local feedback evaluation artifact to {output_path}")
+
+
 @app.command("launch-demo")
 def launch_demo(
     base_path: Path = BASE_PATH_OPTION,
-    config_path: Path | None = ANALYSIS_CONFIG_PATH_OPTION,
+    config_path: Path = ANALYSIS_CONFIG_PATH_OPTION,
     host: str = HOST_OPTION,
     port: int = PORT_OPTION,
     share: bool = SHARE_OPTION,

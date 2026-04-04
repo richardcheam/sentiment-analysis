@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 from functools import lru_cache
 from pathlib import Path
@@ -27,6 +28,7 @@ I was skeptical at first, but setup was smooth and the reporting dashboard actua
 DEFAULT_LABEL_FILTER = "all"
 DEFAULT_PRIORITY_FILTER = "all"
 DEFAULT_SORT_BY = "priority_score"
+REVIEW_ID_COLUMN_CANDIDATES = ("review_id", "id", "ticket_id", "case_id", "conversation_id")
 TEXT_COLUMN_CANDIDATES = (
     "review",
     "review_text",
@@ -39,6 +41,12 @@ TEXT_COLUMN_CANDIDATES = (
     "description",
 )
 TITLE_COLUMN_CANDIDATES = ("title", "subject", "summary", "headline")
+METADATA_SUMMARY_COLUMNS = (
+    ("channel", "Channel breakdown"),
+    ("product", "Product breakdown"),
+)
+OPTIONAL_REVIEW_COLUMNS = ("channel", "product", "created_at")
+EXPORT_DIR = Path("artifacts/exports")
 
 DASHBOARD_CSS = """
 .app-shell {
@@ -121,6 +129,15 @@ DASHBOARD_CSS = """
 """
 
 
+@dataclass(slots=True)
+class ParsedReviewInput:
+    """One parsed review row from pasted text or an uploaded file."""
+
+    review_id: str | None
+    text: str
+    metadata: dict[str, Any]
+
+
 def create_demo(
     base_path: Path = Path("aclImdb"),
     analysis_config: ReviewAnalysisConfig | None = None,
@@ -184,7 +201,12 @@ def create_demo(
                     )
                     sort_by = gr.Dropdown(
                         label="Sort Reviews By",
-                        choices=["priority_score", "negative_probability", "confidence"],
+                        choices=[
+                            "priority_score",
+                            "manual_review_first",
+                            "negative_probability",
+                            "confidence",
+                        ],
                         value=DEFAULT_SORT_BY,
                     )
                     gr.Markdown(
@@ -194,28 +216,37 @@ def create_demo(
 
             kpi_output = gr.HTML()
             summary_output = gr.Markdown(label="Overview")
+            export_output = gr.File(label="Download Current Review View")
 
             with gr.Row(equal_height=False):
                 themes_output = gr.Dataframe(
                     headers=[
                         "theme_id",
-                        "theme_terms",
+                        "theme_label",
+                        "theme_signal",
+                        "keyword_signature",
                         "review_count",
                         "predicted_negative_rate",
-                        "average_confidence",
                         "average_priority_score",
-                        "example_review_ids",
+                        "manual_review_count",
+                        "dominant_channel",
+                        "dominant_product",
+                        "representative_review_preview",
                     ],
-                    label="Theme Radar",
+                    label="Theme Clusters",
                     wrap=True,
                 )
                 reviews_output = gr.Dataframe(
                     headers=[
                         "review_id",
+                        "channel",
+                        "product",
                         "predicted_label",
                         "negative_probability",
                         "confidence",
-                        "theme_terms",
+                        "review_status",
+                        "manual_review_reason",
+                        "theme_label",
                         "priority_level",
                         "priority_score",
                         "text_preview",
@@ -235,14 +266,21 @@ def create_demo(
                     analysis_config=resolved_config,
                 ),
                 inputs=[review_input, review_file, label_filter, priority_filter, sort_by],
-                outputs=[kpi_output, summary_output, themes_output, reviews_output, artifact_state],
+                outputs=[
+                    kpi_output,
+                    summary_output,
+                    themes_output,
+                    reviews_output,
+                    export_output,
+                    artifact_state,
+                ],
             )
 
             for component in (label_filter, priority_filter, sort_by):
                 component.change(
                     fn=render_dashboard_from_state,
                     inputs=[artifact_state, label_filter, priority_filter, sort_by],
-                    outputs=[kpi_output, summary_output, themes_output, reviews_output],
+                    outputs=[kpi_output, summary_output, themes_output, reviews_output, export_output],
                 )
 
     return demo
@@ -257,10 +295,10 @@ def analyze_dashboard(
     base_path: Path = Path("aclImdb"),
     analysis_config: ReviewAnalysisConfig | None = None,
     predictor=None,
-) -> tuple[str, str, pd.DataFrame, pd.DataFrame, dict[str, Any] | None]:
+) -> tuple[str, str, pd.DataFrame, pd.DataFrame, str | None, dict[str, Any] | None]:
     """Analyze pasted reviews and return dashboard-ready outputs plus raw state."""
     try:
-        review_texts = _collect_review_texts(text=text, upload_path=upload_path)
+        review_records = _collect_review_records(text=text, upload_path=upload_path)
     except ValueError as exc:
         empty = pd.DataFrame()
         return (
@@ -269,14 +307,16 @@ def analyze_dashboard(
             empty,
             empty,
             None,
+            None,
         )
-    if not review_texts:
+    if not review_records:
         empty = pd.DataFrame()
         return (
             _build_empty_kpi_html(),
             "Add at least one review separated by blank lines or upload a supported file.",
             empty,
             empty,
+            None,
             None,
         )
 
@@ -286,16 +326,6 @@ def analyze_dashboard(
         model_path=Path(resolved_config.sentiment_model_path).resolve(),
         max_length=resolved_config.sentiment_max_length,
     )
-    review_records = [
-        ReviewRecord(
-            review_id=f"user-{index + 1}",
-            text=review_text,
-            label="unknown",
-            split="demo",
-            source="gradio-demo",
-        )
-        for index, review_text in enumerate(review_texts)
-    ]
 
     artifact = analyze_review_records(
         review_records=review_records,
@@ -304,13 +334,13 @@ def analyze_dashboard(
         sentiment_model_info=loaded_predictor.describe(),
     )
     artifact_payload = artifact.to_dict()
-    kpi_html, summary, theme_frame, review_frame = _render_dashboard_outputs(
+    kpi_html, summary, theme_frame, review_frame, export_path = _render_dashboard_outputs(
         artifact_payload=artifact_payload,
         label_filter=label_filter,
         priority_filter=priority_filter,
         sort_by=sort_by,
     )
-    return kpi_html, summary, theme_frame, review_frame, artifact_payload
+    return kpi_html, summary, theme_frame, review_frame, export_path, artifact_payload
 
 
 def render_dashboard_from_state(
@@ -318,11 +348,11 @@ def render_dashboard_from_state(
     label_filter: str = DEFAULT_LABEL_FILTER,
     priority_filter: str = DEFAULT_PRIORITY_FILTER,
     sort_by: str = DEFAULT_SORT_BY,
-) -> tuple[str, str, pd.DataFrame, pd.DataFrame]:
+) -> tuple[str, str, pd.DataFrame, pd.DataFrame, str | None]:
     """Render dashboard tables and summaries from saved state."""
     if artifact_payload is None:
         empty = pd.DataFrame()
-        return _build_empty_kpi_html(), "Analyze a batch to populate the dashboard.", empty, empty
+        return _build_empty_kpi_html(), "Analyze a batch to populate the dashboard.", empty, empty, None
     return _render_dashboard_outputs(
         artifact_payload=artifact_payload,
         label_filter=label_filter,
@@ -339,7 +369,7 @@ def analyze_reviews_for_demo(
     predictor=None,
 ) -> tuple[str, pd.DataFrame, pd.DataFrame]:
     """Backward-compatible helper for tests and simple demo usage."""
-    _, summary, theme_frame, review_frame, _ = analyze_dashboard(
+    _, summary, theme_frame, review_frame, _, _ = analyze_dashboard(
         text=text,
         upload_path=upload_path,
         label_filter=DEFAULT_LABEL_FILTER,
@@ -357,8 +387,8 @@ def _render_dashboard_outputs(
     label_filter: str,
     priority_filter: str,
     sort_by: str,
-) -> tuple[str, str, pd.DataFrame, pd.DataFrame]:
-    review_frame = pd.DataFrame(artifact_payload["review_rows"])
+) -> tuple[str, str, pd.DataFrame, pd.DataFrame, str | None]:
+    review_frame = _flatten_review_metadata(pd.DataFrame(artifact_payload["review_rows"]))
     filtered_reviews = _filter_review_frame(
         review_frame=review_frame,
         label_filter=label_filter,
@@ -376,25 +406,21 @@ def _render_dashboard_outputs(
     kpi_html = _build_kpi_html(sorted_reviews, artifact_payload["sentiment_model"])
 
     formatted_review_frame = _format_display_frame(
-        sorted_reviews[
-            [
-                "review_id",
-                "predicted_label",
-                "negative_probability",
-                "confidence",
-                "theme_terms",
-                "priority_level",
-                "priority_score",
-                "text_preview",
-            ]
-        ],
+        sorted_reviews[_review_display_columns(sorted_reviews)],
         ["negative_probability", "confidence", "priority_score"],
     )
     formatted_theme_frame = _format_display_frame(
         theme_frame,
-        ["predicted_negative_rate", "average_confidence", "average_priority_score"],
+        ["predicted_negative_rate", "average_priority_score"],
     )
-    return kpi_html, summary, formatted_theme_frame, formatted_review_frame
+    export_path = _write_dashboard_export(
+        review_frame=sorted_reviews,
+        artifact_payload=artifact_payload,
+        label_filter=label_filter,
+        priority_filter=priority_filter,
+        sort_by=sort_by,
+    )
+    return kpi_html, summary, formatted_theme_frame, formatted_review_frame, export_path
 
 
 def _filter_review_frame(
@@ -413,6 +439,11 @@ def _filter_review_frame(
 def _sort_review_frame(review_frame: pd.DataFrame, sort_by: str) -> pd.DataFrame:
     if review_frame.empty:
         return review_frame
+    if sort_by == "manual_review_first":
+        return review_frame.sort_values(
+            by=["requires_manual_review", "priority_score", "negative_probability"],
+            ascending=[False, False, False],
+        ).reset_index(drop=True)
     allowed_sorts = {"priority_score", "negative_probability", "confidence"}
     sort_column = sort_by if sort_by in allowed_sorts else DEFAULT_SORT_BY
     return review_frame.sort_values(by=sort_column, ascending=False).reset_index(drop=True)
@@ -423,29 +454,36 @@ def _build_theme_frame_from_reviews(review_frame: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(
             columns=[
                 "theme_id",
-                "theme_terms",
+                "theme_label",
+                "theme_signal",
+                "keyword_signature",
                 "review_count",
                 "predicted_negative_rate",
-                "average_confidence",
                 "average_priority_score",
-                "example_review_ids",
+                "manual_review_count",
+                "dominant_channel",
+                "dominant_product",
+                "representative_review_preview",
             ]
         )
 
     rows: list[dict[str, Any]] = []
     for theme_id, theme_group in review_frame.groupby("theme_id", observed=False):
+        negative_rate = float((theme_group["predicted_label"] == "negative").mean())
+        representative_review = _representative_review_preview(theme_group)
         rows.append(
             {
                 "theme_id": int(theme_id),
-                "theme_terms": theme_group["theme_terms"].iloc[0],
+                "theme_label": theme_group["theme_label"].iloc[0],
+                "theme_signal": _theme_signal_label(negative_rate),
+                "keyword_signature": theme_group["theme_terms"].iloc[0],
                 "review_count": int(len(theme_group)),
-                "predicted_negative_rate": round(
-                    float((theme_group["predicted_label"] == "negative").mean()),
-                    2,
-                ),
-                "average_confidence": round(float(theme_group["confidence"].mean()), 2),
+                "predicted_negative_rate": round(negative_rate, 2),
                 "average_priority_score": round(float(theme_group["priority_score"].mean()), 2),
-                "example_review_ids": ", ".join(theme_group["review_id"].head(3).tolist()),
+                "manual_review_count": int(theme_group["requires_manual_review"].sum()),
+                "dominant_channel": _dominant_value_from_frame(theme_group, "channel"),
+                "dominant_product": _dominant_value_from_frame(theme_group, "product"),
+                "representative_review_preview": representative_review,
             }
         )
     frame = pd.DataFrame(rows)
@@ -466,20 +504,27 @@ def _build_summary_markdown(
             "No reviews match the current filter selection."
         )
 
-    top_theme = review_frame.iloc[0]["theme_terms"]
+    top_theme = review_frame.iloc[0]["theme_label"]
     urgent_count = int((review_frame["priority_level"] == "urgent").sum())
+    manual_review_count = int(review_frame["requires_manual_review"].sum())
     predicted_negative_rate = float((review_frame["predicted_label"] == "negative").mean())
     model_name = artifact_payload["sentiment_model"].get("model_name", "unknown")
     total_reviews = len(artifact_payload["review_rows"])
-    return (
+    sections = [
         f"**Sentiment model:** {model_name}\n\n"
         f"**Reviews analyzed:** {total_reviews}\n\n"
         f"**Visible reviews:** {len(review_frame)} of {total_reviews}\n\n"
         f"**Predicted negative rate:** {predicted_negative_rate * 100:.2f}%\n\n"
         f"**Urgent reviews in view:** {urgent_count}\n\n"
+        f"**Manual-review items in view:** {manual_review_count}\n\n"
         f"**Current top theme:** {top_theme}\n\n"
         f"**Filters:** label=`{label_filter}`, priority=`{priority_filter}`"
-    )
+    ]
+    for column, title in METADATA_SUMMARY_COLUMNS:
+        section = _build_metadata_breakdown_markdown(review_frame, column=column, title=title)
+        if section:
+            sections.append(section)
+    return "\n\n".join(sections)
 
 
 def _build_kpi_html(review_frame: pd.DataFrame, sentiment_model: dict[str, Any]) -> str:
@@ -487,6 +532,7 @@ def _build_kpi_html(review_frame: pd.DataFrame, sentiment_model: dict[str, Any])
         return _build_empty_kpi_html()
 
     urgent_count = int((review_frame["priority_level"] == "urgent").sum())
+    manual_review_count = int(review_frame["requires_manual_review"].sum())
     negative_rate = float((review_frame["predicted_label"] == "negative").mean()) * 100.0
     avg_confidence = float(review_frame["confidence"].mean()) * 100.0
     top_priority = float(review_frame["priority_score"].max())
@@ -496,6 +542,7 @@ def _build_kpi_html(review_frame: pd.DataFrame, sentiment_model: dict[str, Any])
         ("Visible Reviews", str(len(review_frame)), "Current reviews after filters"),
         ("Negative Rate", f"{negative_rate:.1f}%", "Predicted negative share"),
         ("Urgent Items", str(urgent_count), "Reviews flagged for fastest triage"),
+        ("Manual Review", str(manual_review_count), "Low-confidence items needing a human pass"),
         ("Avg Confidence", f"{avg_confidence:.1f}%", f"Model backend: {backend}"),
         ("Top Priority", f"{top_priority:.2f}", "Highest current risk score"),
     ]
@@ -598,60 +645,103 @@ def _split_reviews(text: str) -> list[str]:
     return [chunk.strip() for chunk in text.split("\n\n") if chunk.strip()]
 
 
-def _collect_review_texts(text: str, upload_path: str | None) -> list[str]:
-    review_texts = _split_reviews(text)
+def _collect_review_records(text: str, upload_path: str | None) -> list[ReviewRecord]:
+    parsed_inputs = [
+        ParsedReviewInput(
+            review_id=None,
+            text=review_text,
+            metadata={"input_source": "pasted_text"},
+        )
+        for review_text in _split_reviews(text)
+    ]
     if upload_path:
-        review_texts.extend(_parse_review_file(upload_path))
-    return review_texts
+        parsed_inputs.extend(_parse_review_file_records(upload_path))
+
+    records: list[ReviewRecord] = []
+    seen_ids: set[str] = set()
+    for index, parsed in enumerate(parsed_inputs, start=1):
+        review_id = _unique_review_id(parsed.review_id, seen_ids, fallback=f"user-{index}")
+        seen_ids.add(review_id)
+        records.append(
+            ReviewRecord(
+                review_id=review_id,
+                text=parsed.text,
+                label="unknown",
+                split="demo",
+                source="gradio-demo",
+                metadata=parsed.metadata,
+            )
+        )
+    return records
 
 
 def _parse_review_file(upload_path: str | Path) -> list[str]:
+    return [entry.text for entry in _parse_review_file_records(upload_path)]
+
+
+def _parse_review_file_records(upload_path: str | Path) -> list[ParsedReviewInput]:
     path = Path(upload_path)
     suffix = path.suffix.lower()
     if suffix == ".csv":
         frame = pd.read_csv(path)
-        return _extract_review_texts_from_frame(frame)
+        entries = _extract_review_entries_from_frame(frame)
+        return _attach_upload_source(entries, path.name)
     if suffix == ".tsv":
         frame = pd.read_csv(path, sep="\t")
-        return _extract_review_texts_from_frame(frame)
+        entries = _extract_review_entries_from_frame(frame)
+        return _attach_upload_source(entries, path.name)
     if suffix in {".txt", ".md"}:
-        return _split_reviews(path.read_text(encoding="utf-8"))
+        entries = [
+            ParsedReviewInput(
+                review_id=None,
+                text=review_text,
+                metadata={},
+            )
+            for review_text in _split_reviews(path.read_text(encoding="utf-8"))
+        ]
+        return _attach_upload_source(entries, path.name)
     if suffix == ".json":
         payload = json.loads(path.read_text(encoding="utf-8"))
-        return _extract_review_texts_from_json_payload(payload)
+        entries = _extract_review_entries_from_json_payload(payload)
+        return _attach_upload_source(entries, path.name)
     if suffix in {".jsonl", ".ndjson"}:
         rows = [
             json.loads(line)
             for line in path.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
-        return _extract_review_texts_from_json_payload(rows)
+        entries = _extract_review_entries_from_json_payload(rows)
+        return _attach_upload_source(entries, path.name)
     raise ValueError(
         f"Unsupported file type '{suffix or 'unknown'}'. Use CSV, TSV, JSON, JSONL/NDJSON, TXT, or MD."
     )
 
 
-def _extract_review_texts_from_json_payload(payload: Any) -> list[str]:
+def _extract_review_entries_from_json_payload(payload: Any) -> list[ParsedReviewInput]:
     if isinstance(payload, list):
         if not payload:
             return []
         if all(isinstance(item, str) for item in payload):
-            return [item.strip() for item in payload if item.strip()]
+            return [
+                ParsedReviewInput(review_id=None, text=item.strip(), metadata={})
+                for item in payload
+                if item.strip()
+            ]
         if all(isinstance(item, dict) for item in payload):
-            return _extract_review_texts_from_frame(pd.DataFrame(payload))
+            return _extract_review_entries_from_frame(pd.DataFrame(payload))
     if isinstance(payload, dict):
         for key in ("reviews", "records", "data", "items"):
             value = payload.get(key)
             if isinstance(value, list):
-                return _extract_review_texts_from_json_payload(value)
+                return _extract_review_entries_from_json_payload(value)
         if any(isinstance(value, list) for value in payload.values()):
-            return _extract_review_texts_from_frame(pd.DataFrame(payload))
+            return _extract_review_entries_from_frame(pd.DataFrame(payload))
     raise ValueError(
         "JSON upload must be a list of strings, a list of objects, or an object containing reviews/data/records."
     )
 
 
-def _extract_review_texts_from_frame(frame: pd.DataFrame) -> list[str]:
+def _extract_review_entries_from_frame(frame: pd.DataFrame) -> list[ParsedReviewInput]:
     if frame.empty:
         return []
 
@@ -661,6 +751,11 @@ def _extract_review_texts_from_frame(frame: pd.DataFrame) -> list[str]:
     }
     text_column = _pick_column(normalized_columns, TEXT_COLUMN_CANDIDATES)
     title_column = _pick_column(normalized_columns, TITLE_COLUMN_CANDIDATES, exclude=text_column)
+    review_id_column = _pick_column(
+        normalized_columns,
+        REVIEW_ID_COLUMN_CANDIDATES,
+        exclude=text_column,
+    )
 
     if text_column is None:
         if len(frame.columns) == 1:
@@ -680,14 +775,29 @@ def _extract_review_texts_from_frame(frame: pd.DataFrame) -> list[str]:
                     f"Available columns: {', '.join(map(str, frame.columns))}"
                 )
 
-    texts: list[str] = []
+    entries: list[ParsedReviewInput] = []
     for row in frame.fillna("").to_dict(orient="records"):
         body = str(row.get(text_column, "")).strip()
         title = str(row.get(title_column, "")).strip() if title_column is not None else ""
         combined = f"{title}\n\n{body}".strip() if title and body else (title or body)
         if combined:
-            texts.append(combined)
-    return texts
+            raw_review_id = (
+                str(row.get(review_id_column, "")).strip()
+                if review_id_column is not None
+                else ""
+            )
+            entries.append(
+                ParsedReviewInput(
+                    review_id=raw_review_id or None,
+                    text=combined,
+                    metadata=_extract_metadata_from_row(
+                        row=row,
+                        normalized_columns=normalized_columns,
+                        ignored_columns={text_column, title_column, review_id_column},
+                    ),
+                )
+            )
+    return entries
 
 
 def _pick_column(
@@ -714,3 +824,259 @@ def _format_display_frame(frame: pd.DataFrame, columns: list[str]) -> pd.DataFra
         if column in formatted.columns:
             formatted[column] = formatted[column].map(lambda value: f"{float(value):.2f}")
     return formatted
+
+
+def _attach_upload_source(entries: list[ParsedReviewInput], source_name: str) -> list[ParsedReviewInput]:
+    return [
+        ParsedReviewInput(
+            review_id=entry.review_id,
+            text=entry.text,
+            metadata={
+                **entry.metadata,
+                "input_source": "uploaded_file",
+                "source_file": source_name,
+            },
+        )
+        for entry in entries
+    ]
+
+
+def _extract_metadata_from_row(
+    row: dict[Any, Any],
+    normalized_columns: dict[Any, str],
+    ignored_columns: set[Any | None],
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    for column, value in row.items():
+        if column in ignored_columns:
+            continue
+        cleaned_value = _clean_metadata_value(value)
+        if cleaned_value in (None, ""):
+            continue
+        metadata[normalized_columns.get(column, _normalize_column_name(str(column)))] = cleaned_value
+    return metadata
+
+
+def _clean_metadata_value(value: Any) -> Any | None:
+    if value is None or pd.isna(value):
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return cleaned or None
+    if isinstance(value, (bool, int, float)):
+        return value
+    return str(value)
+
+
+def _unique_review_id(candidate: str | None, seen_ids: set[str], fallback: str) -> str:
+    base_value = (candidate or "").strip() or fallback
+    if base_value not in seen_ids:
+        return base_value
+    suffix = 2
+    while f"{base_value}-{suffix}" in seen_ids:
+        suffix += 1
+    return f"{base_value}-{suffix}"
+
+
+def _flatten_review_metadata(review_frame: pd.DataFrame) -> pd.DataFrame:
+    if review_frame.empty:
+        return review_frame
+
+    flattened = review_frame.copy()
+    metadata_rows = [
+        row if isinstance(row, dict) else {}
+        for row in flattened.get("metadata", pd.Series(dtype=object)).tolist()
+    ]
+    if metadata_rows:
+        metadata_frame = pd.DataFrame(metadata_rows)
+        metadata_columns = [
+            column
+            for column in metadata_frame.columns
+            if column not in flattened.columns
+        ]
+        if metadata_columns:
+            flattened = pd.concat(
+                [flattened.drop(columns=["metadata"], errors="ignore"), metadata_frame[metadata_columns]],
+                axis=1,
+            )
+        else:
+            flattened = flattened.drop(columns=["metadata"], errors="ignore")
+
+    for column in OPTIONAL_REVIEW_COLUMNS:
+        if column not in flattened.columns:
+            flattened[column] = ""
+    if "review_status" not in flattened.columns:
+        flattened["review_status"] = "auto_triaged"
+    if "manual_review_reason" not in flattened.columns:
+        flattened["manual_review_reason"] = "clear_enough"
+    if "requires_manual_review" not in flattened.columns:
+        flattened["requires_manual_review"] = False
+    return flattened
+
+
+def _review_display_columns(review_frame: pd.DataFrame) -> list[str]:
+    columns = ["review_id"]
+    for column in OPTIONAL_REVIEW_COLUMNS:
+        if _column_has_values(review_frame, column):
+            columns.append(column)
+    columns.extend(
+        [
+            "predicted_label",
+            "negative_probability",
+            "confidence",
+            "review_status",
+            "manual_review_reason",
+            "theme_label",
+            "priority_level",
+            "priority_score",
+            "text_preview",
+        ]
+    )
+    return [column for column in columns if column in review_frame.columns]
+
+
+def _column_has_values(review_frame: pd.DataFrame, column: str) -> bool:
+    if column not in review_frame.columns:
+        return False
+    series = review_frame[column]
+    if series.empty:
+        return False
+    return bool(series.fillna("").astype(str).str.strip().ne("").any())
+
+
+def _build_metadata_breakdown_markdown(
+    review_frame: pd.DataFrame,
+    column: str,
+    title: str,
+    limit: int = 3,
+) -> str:
+    if not _column_has_values(review_frame, column):
+        return ""
+
+    slice_frame = review_frame.copy()
+    slice_frame[column] = slice_frame[column].fillna("").astype(str).str.strip()
+    slice_frame = slice_frame[slice_frame[column] != ""]
+    if slice_frame.empty:
+        return ""
+
+    grouped = (
+        slice_frame.groupby(column, dropna=False, observed=False)
+        .agg(
+            review_count=("review_id", "count"),
+            negative_rate=("predicted_label", lambda values: float((values == "negative").mean())),
+            manual_review_count=("requires_manual_review", "sum"),
+        )
+        .reset_index()
+        .sort_values(["review_count", "negative_rate"], ascending=[False, False])
+        .head(limit)
+    )
+
+    lines = [f"**{title}:**"]
+    for _, row in grouped.iterrows():
+        lines.append(
+            f"- {row[column]}: {int(row['review_count'])} reviews, "
+            f"{float(row['negative_rate']) * 100:.1f}% negative, "
+            f"{int(row['manual_review_count'])} manual review"
+        )
+    return "\n".join(lines)
+
+
+def _theme_signal_label(predicted_negative_rate: float) -> str:
+    if predicted_negative_rate >= 0.7:
+        return "Complaint hotspot"
+    if predicted_negative_rate <= 0.3:
+        return "Positive highlight"
+    return "Mixed feedback"
+
+
+def _dominant_value_from_frame(review_frame: pd.DataFrame, column: str) -> str:
+    if not _column_has_values(review_frame, column):
+        return "n/a"
+    values = review_frame[column].fillna("").astype(str).str.strip()
+    values = values[values != ""]
+    if values.empty:
+        return "n/a"
+    return str(values.value_counts().index[0])
+
+
+def _representative_review_preview(theme_group: pd.DataFrame) -> str:
+    representative = (
+        theme_group.sort_values(
+            ["requires_manual_review", "priority_score", "negative_probability"],
+            ascending=[False, False, False],
+        )
+        .iloc[0]
+    )
+    return str(representative["text_preview"])
+
+
+def _write_dashboard_export(
+    review_frame: pd.DataFrame,
+    artifact_payload: dict[str, Any],
+    label_filter: str,
+    priority_filter: str,
+    sort_by: str,
+) -> str | None:
+    if review_frame.empty:
+        return None
+
+    EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    export_path = EXPORT_DIR / _export_filename(
+        label_filter=label_filter,
+        priority_filter=priority_filter,
+        sort_by=sort_by,
+    )
+
+    export_frame = review_frame.copy()
+    export_frame["model_name"] = artifact_payload.get("sentiment_model", {}).get("model_name", "unknown")
+    export_frame["label_filter"] = label_filter
+    export_frame["priority_filter"] = priority_filter
+    export_frame["sort_by"] = sort_by
+
+    export_columns = _ordered_export_columns(export_frame)
+    export_frame[export_columns].to_csv(export_path, index=False)
+    return str(export_path)
+
+
+def _export_filename(label_filter: str, priority_filter: str, sort_by: str) -> str:
+    return f"dashboard_reviews_{label_filter}_{priority_filter}_{sort_by}.csv"
+
+
+def _ordered_export_columns(review_frame: pd.DataFrame) -> list[str]:
+    preferred_columns = [
+        "review_id",
+        "channel",
+        "product",
+        "created_at",
+        "source_file",
+        "input_source",
+        "predicted_label",
+        "negative_probability",
+        "positive_probability",
+        "confidence",
+        "uncertainty",
+        "review_status",
+        "manual_review_reason",
+        "requires_manual_review",
+        "priority_level",
+        "priority_score",
+        "theme_id",
+        "theme_label",
+        "theme_terms",
+        "word_count",
+        "text",
+        "text_preview",
+        "split",
+        "true_label",
+        "model_name",
+        "label_filter",
+        "priority_filter",
+        "sort_by",
+    ]
+    columns = [column for column in preferred_columns if column in review_frame.columns]
+    remaining_columns = [
+        column
+        for column in review_frame.columns
+        if column not in columns and column != "metadata"
+    ]
+    return columns + sorted(remaining_columns)

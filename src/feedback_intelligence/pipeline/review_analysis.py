@@ -14,6 +14,17 @@ from feedback_intelligence.features.embeddings import build_embeddings
 from feedback_intelligence.inference.sentiment import SklearnSentimentPredictor
 from feedback_intelligence.types import ReviewRecord
 
+THEME_TERM_STOPWORDS = {
+    "br",
+    "br br",
+    "quot",
+    "amp",
+    "lt",
+    "gt",
+    "really",
+    "just",
+}
+
 
 @dataclass(slots=True)
 class ReviewAnalysisArtifact:
@@ -66,6 +77,7 @@ def analyze_reviews_with_predictor(
             "true_label": [record.label for record in review_records],
             "split": [record.split for record in review_records],
             "word_count": [record.word_count for record in review_records],
+            "metadata": [record.metadata or {} for record in review_records],
         }
     )
     if frame.empty:
@@ -98,6 +110,18 @@ def analyze_reviews_with_predictor(
     frame["theme_terms"] = frame["theme_id"].map(
         lambda theme_id: theme_result.top_terms_by_cluster[int(theme_id)]
     )
+    frame["theme_label"] = frame["theme_terms"].map(_theme_label)
+    frame["requires_manual_review"] = frame.apply(
+        lambda row: _requires_manual_review(row, analysis_config),
+        axis=1,
+    )
+    frame["manual_review_reason"] = frame.apply(
+        lambda row: _manual_review_reason(row, analysis_config),
+        axis=1,
+    )
+    frame["review_status"] = frame["requires_manual_review"].map(
+        lambda value: "manual_review" if bool(value) else "auto_triaged"
+    )
     frame["priority_score"] = frame.apply(_priority_score, axis=1)
     frame["priority_level"] = frame["priority_score"].map(_priority_level)
     frame["text_preview"] = frame["text"].str.slice(0, 220).str.replace("\n", " ", regex=False)
@@ -106,13 +130,14 @@ def analyze_reviews_with_predictor(
         ["positive_probability", "negative_probability", "confidence", "uncertainty"],
     )
 
-    theme_summary = _build_theme_summary(frame)
-    prioritized = (
-        frame.sort_values(["priority_score", "negative_probability"], ascending=[False, False])
-        .head(analysis_config.max_reviews_in_report)
-        .copy()
+    theme_summary = _build_theme_summary(frame, theme_result=theme_result)
+    prioritized = frame.sort_values(
+        ["priority_score", "negative_probability"],
+        ascending=[False, False],
+    ).copy()
+    prioritized["theme_terms"] = prioritized["theme_terms"].map(
+        lambda terms: ", ".join(_clean_theme_terms(terms))
     )
-    prioritized["theme_terms"] = prioritized["theme_terms"].map(lambda terms: ", ".join(terms))
 
     return ReviewAnalysisArtifact(
         sentiment_model=sentiment_model_info or predictor.describe(),
@@ -133,10 +158,16 @@ def analyze_reviews_with_predictor(
                 "uncertainty",
                 "word_count",
                 "theme_id",
+                "theme_label",
                 "theme_terms",
+                "requires_manual_review",
+                "manual_review_reason",
+                "review_status",
                 "priority_score",
                 "priority_level",
                 "text_preview",
+                "text",
+                "metadata",
             ]
         ].to_dict(orient="records"),
     )
@@ -177,20 +208,37 @@ def _priority_level(score: float) -> str:
     return "low"
 
 
-def _build_theme_summary(frame: pd.DataFrame) -> list[dict[str, Any]]:
+def _build_theme_summary(
+    frame: pd.DataFrame,
+    theme_result=None,
+) -> list[dict[str, Any]]:
     summary_rows: list[dict[str, Any]] = []
     for theme_id, theme_frame in frame.groupby("theme_id", observed=False):
         theme_terms = theme_frame["theme_terms"].iloc[0]
+        theme_label = str(theme_frame["theme_label"].iloc[0])
+        representative_review = _representative_theme_row(
+            frame=frame,
+            theme_frame=theme_frame,
+            theme_id=int(theme_id),
+            theme_result=theme_result,
+        )
+        negative_rate = float((theme_frame["predicted_label"] == "negative").mean())
         summary_rows.append(
             {
                 "theme_id": int(theme_id),
+                "theme_label": theme_label,
                 "theme_terms": theme_terms,
+                "keyword_signature": ", ".join(_clean_theme_terms(theme_terms)),
+                "theme_signal": _theme_signal(negative_rate),
                 "review_count": int(len(theme_frame)),
-                "predicted_negative_rate": round(
-                    float((theme_frame["predicted_label"] == "negative").mean()), 2
-                ),
+                "predicted_negative_rate": round(negative_rate, 2),
                 "average_confidence": round(float(theme_frame["confidence"].mean()), 2),
                 "average_priority_score": round(float(theme_frame["priority_score"].mean()), 2),
+                "manual_review_count": int(theme_frame["requires_manual_review"].sum()),
+                "dominant_channel": _dominant_metadata_value(theme_frame, "channel"),
+                "dominant_product": _dominant_metadata_value(theme_frame, "product"),
+                "representative_review_id": str(representative_review["review_id"]),
+                "representative_review_preview": str(representative_review["text_preview"]),
                 "example_review_ids": theme_frame["review_id"].head(3).tolist(),
             }
         )
@@ -200,3 +248,98 @@ def _build_theme_summary(frame: pd.DataFrame) -> list[dict[str, Any]]:
 def _round_output_columns(frame: pd.DataFrame, columns: list[str]) -> None:
     for column in columns:
         frame[column] = frame[column].map(lambda value: round(float(value), 2))
+
+
+def _requires_manual_review(row: pd.Series, config: ReviewAnalysisConfig) -> bool:
+    confidence = float(row["confidence"])
+    uncertainty = float(row["uncertainty"])
+    return bool(
+        confidence < config.manual_review_confidence_threshold
+        or uncertainty > config.manual_review_uncertainty_threshold
+    )
+
+
+def _manual_review_reason(row: pd.Series, config: ReviewAnalysisConfig) -> str:
+    reasons: list[str] = []
+    confidence = float(row["confidence"])
+    uncertainty = float(row["uncertainty"])
+    if confidence < config.manual_review_confidence_threshold:
+        reasons.append("low_confidence")
+    if uncertainty > config.manual_review_uncertainty_threshold:
+        reasons.append("high_uncertainty")
+    return ",".join(reasons) if reasons else "clear_enough"
+
+
+def _theme_label(terms: list[str]) -> str:
+    cleaned_terms = _clean_theme_terms(terms)
+    if not cleaned_terms:
+        return "General feedback"
+    chosen_terms = cleaned_terms[:3]
+    return " / ".join(_title_case_phrase(term) for term in chosen_terms)
+
+
+def _clean_theme_terms(terms: list[str]) -> list[str]:
+    cleaned: list[str] = []
+    seen_roots: set[str] = set()
+    for term in terms:
+        normalized = " ".join(
+            token
+            for token in str(term).strip().lower().split()
+            if token and token not in THEME_TERM_STOPWORDS
+        )
+        if not normalized:
+            continue
+        root = normalized.replace(" ", "").rstrip("s")
+        if root in seen_roots:
+            continue
+        seen_roots.add(root)
+        cleaned.append(normalized)
+    return cleaned
+
+
+def _title_case_phrase(text: str) -> str:
+    if not text:
+        return text
+    return text[0].upper() + text[1:]
+
+
+def _theme_signal(predicted_negative_rate: float) -> str:
+    if predicted_negative_rate >= 0.7:
+        return "Complaint hotspot"
+    if predicted_negative_rate <= 0.3:
+        return "Positive highlight"
+    return "Mixed feedback"
+
+
+def _dominant_metadata_value(theme_frame: pd.DataFrame, key: str) -> str:
+    values = [
+        str(value).strip()
+        for value in theme_frame["metadata"].map(
+            lambda metadata: (metadata or {}).get(key, "")
+            if isinstance(metadata, dict)
+            else ""
+        )
+        if str(value).strip()
+    ]
+    if not values:
+        return "n/a"
+    return pd.Series(values).value_counts().index[0]
+
+
+def _representative_theme_row(
+    frame: pd.DataFrame,
+    theme_frame: pd.DataFrame,
+    theme_id: int,
+    theme_result,
+) -> pd.Series:
+    if theme_result is not None and hasattr(theme_result, "representative_row_index_by_cluster"):
+        representative_index = theme_result.representative_row_index_by_cluster.get(theme_id)
+        if representative_index is not None:
+            return frame.iloc[int(representative_index)]
+    return (
+        theme_frame.sort_values(
+            ["requires_manual_review", "priority_score", "negative_probability"],
+            ascending=[False, False, False],
+        )
+        .iloc[0]
+    )

@@ -32,6 +32,7 @@ def test_review_analysis_returns_priority_and_themes() -> None:
             label="negative",
             split="test",
             source="unit-test",
+            metadata={"channel": "email", "product": "streaming"},
         ),
         ReviewRecord(
             review_id="a-2",
@@ -65,7 +66,9 @@ def test_review_analysis_returns_priority_and_themes() -> None:
             theme_clusters=2,
             embedding_dimensions=4,
             embedding_max_features=64,
-            max_reviews_in_report=4,
+            manual_review_confidence_threshold=0.95,
+            manual_review_uncertainty_threshold=0.05,
+            max_reviews_in_report=2,
         ),
     )
 
@@ -74,3 +77,7 @@ def test_review_analysis_returns_priority_and_themes() -> None:
     assert "priority_score" in artifact.review_rows[0]
     assert "priority_level" in artifact.review_rows[0]
     assert "theme_terms" in artifact.review_rows[0]
+    assert "requires_manual_review" in artifact.review_rows[0]
+    assert "review_status" in artifact.review_rows[0]
+    assert "metadata" in artifact.review_rows[0]
+    assert "manual_review_count" in artifact.theme_summary[0]

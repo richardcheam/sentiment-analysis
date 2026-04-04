@@ -1,0 +1,13 @@
+{
+  "dataset_path": "data/eval/customer_feedback_amazon_eval_200.csv",
+  "text_column": "review_text",
+  "title_column": "title",
+  "label_column": "label",
+  "review_id_column": "review_id",
+  "split_name": "eval",
+  "source_name": "amazon_polarity_eval_200",
+  "sentiment_backend": "scikit-learn",
+  "sentiment_model_path": "artifacts/models/tfidf_logreg_imdb.joblib",
+  "sentiment_max_length": 256,
+  "max_error_examples": 20
+}

@@ -47,6 +47,8 @@ class ReviewAnalysisConfig:
     embedding_dimensions: int = 64
     embedding_max_features: int = 10_000
     top_terms_per_theme: int = 6
+    manual_review_confidence_threshold: float = 0.75
+    manual_review_uncertainty_threshold: float = 0.25
     max_reviews_in_report: int = 50
 
     @classmethod
@@ -100,6 +102,31 @@ class AmazonTransferEvaluationConfig:
 
     @classmethod
     def from_json(cls, path: Path) -> AmazonTransferEvaluationConfig:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return cls(**data)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class LocalEvaluationConfig:
+    """Configuration for evaluating a saved model on a local labeled CSV dataset."""
+
+    dataset_path: str = "data/eval/customer_feedback_amazon_eval_200.csv"
+    text_column: str = "review_text"
+    title_column: str = "title"
+    label_column: str = "label"
+    review_id_column: str = "review_id"
+    split_name: str = "eval"
+    source_name: str = "amazon_polarity_eval_200"
+    sentiment_backend: str = "scikit-learn"
+    sentiment_model_path: str = "artifacts/models/tfidf_logreg_imdb.joblib"
+    sentiment_max_length: int = 256
+    max_error_examples: int = 20
+
+    @classmethod
+    def from_json(cls, path: Path) -> LocalEvaluationConfig:
         data = json.loads(path.read_text(encoding="utf-8"))
         return cls(**data)
 

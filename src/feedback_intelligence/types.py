@@ -16,6 +16,7 @@ class ReviewRecord:
     split: str
     source: str
     score: int | None = None
+    metadata: dict[str, Any] | None = None
 
     @property
     def word_count(self) -> int:
@@ -23,4 +24,3 @@ class ReviewRecord:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
-
