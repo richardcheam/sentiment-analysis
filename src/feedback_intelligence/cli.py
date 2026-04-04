@@ -10,13 +10,19 @@ import typer
 from feedback_intelligence.app.gradio_app import create_demo
 from feedback_intelligence.benchmarks.tfidf_logreg import run_tfidf_logreg_baseline
 from feedback_intelligence.config import (
+    AmazonTransferEvaluationConfig,
     BaselineExperimentConfig,
     ReviewAnalysisConfig,
     TransformerTrainingConfig,
 )
+from feedback_intelligence.data.amazon_reviews import (
+    load_amazon_polarity_reviews,
+    summarize_reviews as summarize_amazon_reviews,
+)
 from feedback_intelligence.data.imdb import load_local_imdb_reviews, summarize_reviews
-from feedback_intelligence.inference.sentiment import TransformerSentimentPredictor
+from feedback_intelligence.inference.sentiment import load_sentiment_predictor
 from feedback_intelligence.pipeline.review_analysis import analyze_reviews_with_predictor
+from feedback_intelligence.pipeline.transfer_evaluation import evaluate_reviews_with_predictor
 from feedback_intelligence.training.transformer import train_transformer_model
 from feedback_intelligence.utils.io import write_json
 
@@ -69,6 +75,17 @@ TRAINER_CONFIG_PATH_OPTION = typer.Option(
     dir_okay=False,
     help="Optional JSON config for transformer training.",
 )
+TRANSFER_CONFIG_PATH_OPTION = typer.Option(
+    None,
+    exists=True,
+    file_okay=True,
+    dir_okay=False,
+    help="Optional JSON config for Amazon transfer evaluation.",
+)
+TRANSFER_OUTPUT_OPTION = typer.Option(
+    Path("artifacts/evaluations/amazon_transfer_tfidf_imdb.json"),
+    help="Where to write the Amazon transfer evaluation artifact.",
+)
 
 
 @app.callback()
@@ -111,6 +128,29 @@ def describe_dataset(
     typer.echo(json.dumps(payload, indent=2))
 
 
+@app.command("describe-amazon-dataset")
+def describe_amazon_dataset(
+    sample_size: int = SAMPLE_SIZE_OPTION,
+    seed: int = SEED_OPTION,
+) -> None:
+    """Print a compact summary of a sampled Amazon polarity dataset slice."""
+    train_records = load_amazon_polarity_reviews(
+        split="train",
+        sample_size=sample_size,
+        seed=seed,
+    )
+    test_records = load_amazon_polarity_reviews(
+        split="test",
+        sample_size=max(sample_size // 2, 2),
+        seed=seed,
+    )
+    payload = {
+        "train": summarize_amazon_reviews(train_records),
+        "test": summarize_amazon_reviews(test_records),
+    }
+    typer.echo(json.dumps(payload, indent=2))
+
+
 @app.command("run-baseline")
 def run_baseline(
     base_path: Path = BASE_PATH_OPTION,
@@ -143,6 +183,7 @@ def run_baseline(
     )
     write_json(output_path, result.to_dict())
     typer.echo(f"Wrote benchmark artifact to {output_path}")
+    typer.echo(f"Saved baseline model to {config.model_output_path}")
 
 
 @app.command("train-transformer")
@@ -174,6 +215,8 @@ def train_transformer(
         config=config,
     )
     typer.echo(f"Saved transformer model to {result.output_dir}")
+    typer.echo(f"Best validation checkpoint came from epoch {result.best_epoch}")
+    typer.echo(f"Wrote transformer metrics to {config.metrics_output_path}")
 
 
 @app.command("analyze-reviews")
@@ -194,8 +237,9 @@ def analyze_reviews_command(
         sample_size=analysis_config.analysis_sample_size,
         seed=analysis_config.seed,
     )
-    predictor = TransformerSentimentPredictor(
+    predictor = load_sentiment_predictor(
         model_path=Path(analysis_config.sentiment_model_path).resolve(),
+        backend=analysis_config.sentiment_backend,
         max_length=analysis_config.sentiment_max_length,
     )
     artifact = analyze_reviews_with_predictor(
@@ -206,6 +250,45 @@ def analyze_reviews_command(
     )
     write_json(output_path, artifact.to_dict())
     typer.echo(f"Wrote review analysis artifact to {output_path}")
+
+
+@app.command("evaluate-amazon-transfer")
+def evaluate_amazon_transfer(
+    output_path: Path = TRANSFER_OUTPUT_OPTION,
+    config_path: Path | None = TRANSFER_CONFIG_PATH_OPTION,
+) -> None:
+    """Evaluate a saved sentiment model on Amazon polarity reviews."""
+    config = (
+        AmazonTransferEvaluationConfig.from_json(config_path)
+        if config_path is not None
+        else AmazonTransferEvaluationConfig()
+    )
+    amazon_records = load_amazon_polarity_reviews(
+        split=str(config.dataset_split),
+        sample_size=config.dataset_sample_size,
+        seed=config.seed,
+        include_title=config.include_title,
+        dataset_name=config.dataset_name,
+    )
+    predictor = load_sentiment_predictor(
+        model_path=Path(config.sentiment_model_path).resolve(),
+        backend=config.sentiment_backend,
+        max_length=config.sentiment_max_length,
+    )
+    artifact = evaluate_reviews_with_predictor(
+        review_records=amazon_records,
+        predictor=predictor,
+        dataset_info={
+            "dataset_name": config.dataset_name,
+            "split": config.dataset_split,
+            "sample_size": config.dataset_sample_size,
+            "include_title": config.include_title,
+            "seed": config.seed,
+        },
+        max_error_examples=config.max_error_examples,
+    )
+    write_json(output_path, artifact.to_dict())
+    typer.echo(f"Wrote Amazon transfer evaluation artifact to {output_path}")
 
 
 @app.command("launch-demo")

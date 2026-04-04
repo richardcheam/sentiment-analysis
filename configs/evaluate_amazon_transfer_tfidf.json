@@ -1,0 +1,11 @@
+{
+  "dataset_name": "SetFit/amazon_polarity",
+  "dataset_split": "test",
+  "dataset_sample_size": 2000,
+  "include_title": true,
+  "seed": 42,
+  "sentiment_backend": "scikit-learn",
+  "sentiment_model_path": "artifacts/models/tfidf_logreg_imdb.joblib",
+  "sentiment_max_length": 256,
+  "max_error_examples": 20
+}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -14,6 +15,7 @@ from sklearn.pipeline import Pipeline
 
 from feedback_intelligence.config import BaselineExperimentConfig
 from feedback_intelligence.types import ReviewRecord
+from feedback_intelligence.utils.io import save_joblib
 
 
 @dataclass(slots=True)
@@ -21,6 +23,7 @@ class BenchmarkResult:
     """Structured output for a benchmark run."""
 
     model_name: str
+    model_output_path: str | None
     config: dict[str, Any]
     dataset: dict[str, Any]
     validation_metrics: dict[str, Any]
@@ -46,11 +49,14 @@ def run_tfidf_logreg_baseline(
     train_records: list[ReviewRecord],
     test_records: list[ReviewRecord],
     config: BaselineExperimentConfig,
+    model_output_path: Path | None = None,
 ) -> BenchmarkResult:
     """Fit a TF-IDF + Logistic Regression benchmark and return rich metrics."""
     trained = fit_tfidf_logreg_pipeline(train_records, config)
     test_frame = _records_to_frame(test_records)
     pipeline = trained.pipeline
+    resolved_model_output_path = model_output_path or Path(config.model_output_path)
+    save_joblib(resolved_model_output_path, pipeline)
 
     test_metrics = _evaluate_frame(pipeline, test_frame)
     slice_metrics = _slice_metrics(test_frame, pipeline)
@@ -62,6 +68,7 @@ def run_tfidf_logreg_baseline(
 
     return BenchmarkResult(
         model_name="tfidf_logistic_regression",
+        model_output_path=str(resolved_model_output_path),
         config=config.to_dict(),
         dataset={
             "train_rows": trained.train_rows,

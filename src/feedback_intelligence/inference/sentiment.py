@@ -11,6 +11,8 @@ import torch
 from sklearn.pipeline import Pipeline
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
+from feedback_intelligence.utils.io import load_joblib
+
 
 @dataclass(slots=True)
 class SentimentPrediction:
@@ -26,8 +28,14 @@ class SentimentPrediction:
 class SklearnSentimentPredictor:
     """Inference wrapper around a fitted scikit-learn pipeline."""
 
-    def __init__(self, pipeline: Pipeline) -> None:
+    def __init__(self, pipeline: Pipeline, model_path: Path | None = None) -> None:
         self.pipeline = pipeline
+        self.model_path = model_path
+
+    @classmethod
+    def from_path(cls, model_path: Path) -> SklearnSentimentPredictor:
+        pipeline = load_joblib(model_path)
+        return cls(pipeline=pipeline, model_path=model_path)
 
     def predict_batch(self, texts: list[str]) -> list[SentimentPrediction]:
         probabilities = self.pipeline.predict_proba(texts)
@@ -51,7 +59,10 @@ class SklearnSentimentPredictor:
         return rows
 
     def describe(self) -> dict[str, Any]:
-        return {"model_name": "tfidf_logistic_regression", "backend": "scikit-learn"}
+        payload = {"model_name": "tfidf_logistic_regression", "backend": "scikit-learn"}
+        if self.model_path is not None:
+            payload["model_path"] = str(self.model_path)
+        return payload
 
 
 class TransformerSentimentPredictor:
@@ -120,3 +131,22 @@ class TransformerSentimentPredictor:
         if torch.backends.mps.is_available():
             return torch.device("mps")
         return torch.device("cpu")
+
+
+def load_sentiment_predictor(
+    model_path: Path,
+    backend: str,
+    max_length: int = 256,
+    device: str = "auto",
+):
+    """Load a sentiment predictor from a saved model artifact."""
+    normalized_backend = backend.strip().lower()
+    if normalized_backend in {"scikit-learn", "sklearn", "tfidf", "tfidf_logreg"}:
+        return SklearnSentimentPredictor.from_path(model_path)
+    if normalized_backend in {"transformers", "huggingface"}:
+        return TransformerSentimentPredictor(
+            model_path=model_path,
+            max_length=max_length,
+            device=device,
+        )
+    raise ValueError(f"Unsupported sentiment backend: {backend}")

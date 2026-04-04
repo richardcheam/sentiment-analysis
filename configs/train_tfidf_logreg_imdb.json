@@ -1,0 +1,13 @@
+{
+  "sample_size": 25000,
+  "validation_fraction": 0.2,
+  "seed": 42,
+  "max_features": 50000,
+  "min_df": 2,
+  "ngram_min": 1,
+  "ngram_max": 2,
+  "max_iter": 2000,
+  "c": 4.0,
+  "max_error_examples": 20,
+  "model_output_path": "artifacts/models/tfidf_logreg_imdb.joblib"
+}

@@ -425,6 +425,74 @@ nvtx = [
 ]
 
 [[package]]
+name = "customer-feedback-intelligence"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "datasets" },
+    { name = "evaluate" },
+    { name = "matplotlib" },
+    { name = "nltk" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "pyarrow" },
+    { name = "scikit-learn" },
+    { name = "seaborn" },
+    { name = "sentence-transformers" },
+    { name = "torch" },
+    { name = "transformers" },
+    { name = "typer" },
+    { name = "umap-learn" },
+]
+
+[package.optional-dependencies]
+app = [
+    { name = "fastapi" },
+    { name = "gradio" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "ipykernel" },
+    { name = "jupyterlab" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "datasets", specifier = ">=3.5.0,<4" },
+    { name = "evaluate", specifier = ">=0.4.3,<0.5" },
+    { name = "fastapi", marker = "extra == 'app'", specifier = ">=0.115.12,<0.116" },
+    { name = "gradio", marker = "extra == 'app'", specifier = ">=5.24.0,<6" },
+    { name = "matplotlib", specifier = ">=3.10.1,<4" },
+    { name = "nltk", specifier = ">=3.9.1,<4" },
+    { name = "numpy", specifier = ">=2.2.4,<3" },
+    { name = "pandas", specifier = ">=2.2.3,<3" },
+    { name = "pyarrow", specifier = ">=20.0.0,<21" },
+    { name = "scikit-learn", specifier = ">=1.6.1,<2" },
+    { name = "seaborn", specifier = ">=0.13.2,<0.14" },
+    { name = "sentence-transformers", specifier = ">=4.1.0,<5" },
+    { name = "torch", specifier = ">=2.6.0,<3" },
+    { name = "transformers", specifier = ">=4.51.3,<5" },
+    { name = "typer", specifier = ">=0.15.2,<0.16" },
+    { name = "umap-learn", specifier = ">=0.5.7,<0.6" },
+    { name = "uvicorn", extras = ["standard"], marker = "extra == 'app'", specifier = ">=0.34.0,<0.35" },
+]
+provides-extras = ["app"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "ipykernel", specifier = ">=6.29.5,<7" },
+    { name = "jupyterlab", specifier = ">=4.4.0,<5" },
+    { name = "pytest", specifier = ">=8.3.5,<9" },
+    { name = "pytest-cov", specifier = ">=6.1.1,<7" },
+    { name = "ruff", specifier = ">=0.11.5,<0.12" },
+]
+
+[[package]]
 name = "cycler"
 version = "0.12.1"
 source = { registry = "https://pypi.org/simple" }
@@ -549,74 +617,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/20/b5/23b216d9d985a956623b6bd12d4086b60f0059b27799f23016af04a74ea1/fastjsonschema-2.21.2.tar.gz", hash = "sha256:b1eb43748041c880796cd077f1a07c3d94e93ae84bba5ed36800a33554ae05de", size = 374130, upload-time = "2025-08-14T18:49:36.666Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/cb/a8/20d0723294217e47de6d9e2e40fd4a9d2f7c4b6ef974babd482a59743694/fastjsonschema-2.21.2-py3-none-any.whl", hash = "sha256:1c797122d0a86c5cace2e54bf4e819c36223b552017172f32c5c024a6b77e463", size = 24024, upload-time = "2025-08-14T18:49:34.776Z" },
-]
-
-[[package]]
-name = "feedback-intelligence"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "datasets" },
-    { name = "evaluate" },
-    { name = "matplotlib" },
-    { name = "nltk" },
-    { name = "numpy" },
-    { name = "pandas" },
-    { name = "pyarrow" },
-    { name = "scikit-learn" },
-    { name = "seaborn" },
-    { name = "sentence-transformers" },
-    { name = "torch" },
-    { name = "transformers" },
-    { name = "typer" },
-    { name = "umap-learn" },
-]
-
-[package.optional-dependencies]
-app = [
-    { name = "fastapi" },
-    { name = "gradio" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "ipykernel" },
-    { name = "jupyterlab" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "datasets", specifier = ">=3.5.0,<4" },
-    { name = "evaluate", specifier = ">=0.4.3,<0.5" },
-    { name = "fastapi", marker = "extra == 'app'", specifier = ">=0.115.12,<0.116" },
-    { name = "gradio", marker = "extra == 'app'", specifier = ">=5.24.0,<6" },
-    { name = "matplotlib", specifier = ">=3.10.1,<4" },
-    { name = "nltk", specifier = ">=3.9.1,<4" },
-    { name = "numpy", specifier = ">=2.2.4,<3" },
-    { name = "pandas", specifier = ">=2.2.3,<3" },
-    { name = "pyarrow", specifier = ">=20.0.0,<21" },
-    { name = "scikit-learn", specifier = ">=1.6.1,<2" },
-    { name = "seaborn", specifier = ">=0.13.2,<0.14" },
-    { name = "sentence-transformers", specifier = ">=4.1.0,<5" },
-    { name = "torch", specifier = ">=2.6.0,<3" },
-    { name = "transformers", specifier = ">=4.51.3,<5" },
-    { name = "typer", specifier = ">=0.15.2,<0.16" },
-    { name = "umap-learn", specifier = ">=0.5.7,<0.6" },
-    { name = "uvicorn", extras = ["standard"], marker = "extra == 'app'", specifier = ">=0.34.0,<0.35" },
-]
-provides-extras = ["app"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "ipykernel", specifier = ">=6.29.5,<7" },
-    { name = "jupyterlab", specifier = ">=4.4.0,<5" },
-    { name = "pytest", specifier = ">=8.3.5,<9" },
-    { name = "pytest-cov", specifier = ">=6.1.1,<7" },
-    { name = "ruff", specifier = ">=0.11.5,<0.12" },
 ]
 
 [[package]]

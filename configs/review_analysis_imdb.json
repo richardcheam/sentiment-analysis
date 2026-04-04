@@ -1,5 +1,6 @@
 {
-  "sentiment_model_path": "legacy/models/fine-tuned/roberta_finetuned",
+  "sentiment_backend": "scikit-learn",
+  "sentiment_model_path": "artifacts/models/tfidf_logreg_imdb.joblib",
   "sentiment_max_length": 256,
   "analysis_sample_size": 600,
   "seed": 42,
