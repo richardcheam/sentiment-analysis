@@ -12,6 +12,7 @@ fine-tuned/
 artifacts/
 data/
 models/
+docs/
 
 # Notebook and vector caches
 .vector_cache/
