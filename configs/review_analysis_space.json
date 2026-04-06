@@ -1,0 +1,15 @@
+{
+  "sentiment_backend": "scikit-learn",
+  "sentiment_model_path": "artifacts/models/tfidf_logreg_imdb.joblib",
+  "sentiment_max_length": 256,
+  "analysis_sample_size": 600,
+  "seed": 42,
+  "theme_clusters": 4,
+  "embedding_backend": "tfidf_svd",
+  "embedding_dimensions": 48,
+  "embedding_max_features": 5000,
+  "top_terms_per_theme": 5,
+  "manual_review_confidence_threshold": 0.75,
+  "manual_review_uncertainty_threshold": 0.25,
+  "max_reviews_in_report": 50
+}

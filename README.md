@@ -107,6 +107,33 @@ Optional: fine-tune RoBERTa when more compute is available:
 uv run customer-feedback-intelligence train-transformer --config-path configs/train_roberta_imdb.json
 ```
 
+## Hugging Face Spaces Deployment
+
+I added a lightweight public-demo deployment path for Hugging Face Spaces using
+the saved TF-IDF baseline rather than the heavier transformer stack.
+
+Build the self-contained Space bundle with:
+
+```bash
+python3 scripts/build_huggingface_space_bundle.py
+```
+
+This generates:
+
+- `artifacts/deploy/huggingface-space/`
+
+The generated folder includes:
+
+- a Space-ready `README.md` with Hugging Face metadata
+- a root `app.py` entrypoint
+- lightweight `requirements.txt`
+- the saved TF-IDF model artifact
+- the relevant benchmark and evaluation snapshots
+- sample upload files
+
+From there, copy the generated bundle contents into a new public Gradio Space
+repository and push them to Hugging Face.
+
 ## Recommended Workflow
 
 1. Install dependencies:

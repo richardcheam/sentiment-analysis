@@ -7,9 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import torch
 from sklearn.pipeline import Pipeline
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from feedback_intelligence.utils.io import load_joblib
 
@@ -69,14 +67,16 @@ class TransformerSentimentPredictor:
     """Inference wrapper for a saved Hugging Face sequence classification model."""
 
     def __init__(self, model_path: Path, max_length: int = 256, device: str = "auto") -> None:
+        torch, auto_model, auto_tokenizer = _load_transformer_dependencies()
         self.model_path = model_path
         self.max_length = max_length
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
-        self.model = AutoModelForSequenceClassification.from_pretrained(
+        self._torch = torch
+        self.tokenizer = auto_tokenizer.from_pretrained(model_path)
+        self.model = auto_model.from_pretrained(
             model_path,
             use_safetensors=True,
         )
-        self.device = self._resolve_device(device)
+        self.device = self._resolve_device(device, torch)
         self.model.to(self.device)
         self.model.eval()
 
@@ -90,9 +90,9 @@ class TransformerSentimentPredictor:
         )
         encoded = {key: value.to(self.device) for key, value in encoded.items()}
 
-        with torch.no_grad():
+        with self._torch.no_grad():
             logits = self.model(**encoded).logits
-            probabilities = torch.softmax(logits, dim=-1).cpu().numpy()
+            probabilities = self._torch.softmax(logits, dim=-1).cpu().numpy()
 
         rows: list[SentimentPrediction] = []
         for probs in probabilities:
@@ -123,14 +123,14 @@ class TransformerSentimentPredictor:
         }
 
     @staticmethod
-    def _resolve_device(device: str) -> torch.device:
+    def _resolve_device(device: str, torch_module):
         if device != "auto":
-            return torch.device(device)
-        if torch.cuda.is_available():
-            return torch.device("cuda")
-        if torch.backends.mps.is_available():
-            return torch.device("mps")
-        return torch.device("cpu")
+            return torch_module.device(device)
+        if torch_module.cuda.is_available():
+            return torch_module.device("cuda")
+        if torch_module.backends.mps.is_available():
+            return torch_module.device("mps")
+        return torch_module.device("cpu")
 
 
 def load_sentiment_predictor(
@@ -150,3 +150,15 @@ def load_sentiment_predictor(
             device=device,
         )
     raise ValueError(f"Unsupported sentiment backend: {backend}")
+
+
+def _load_transformer_dependencies():
+    try:
+        import torch
+        from transformers import AutoModelForSequenceClassification, AutoTokenizer
+    except ImportError as exc:
+        raise ImportError(
+            "Transformer inference requires optional dependencies 'torch' and "
+            "'transformers'. Install them before loading a transformer backend."
+        ) from exc
+    return torch, AutoModelForSequenceClassification, AutoTokenizer
